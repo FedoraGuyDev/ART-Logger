@@ -59,8 +59,9 @@ std::string getActualTime(){
 float windowAlpha = 0.0f;
 
 float scroll  = 0;
-
-int main(){/*
+float scrollmax = 0;
+bool autoscroll = false;
+int main(){
     logs.push_back({0,"aaaaaaaa","00:00:00"});
     logs.push_back({2,"bbbbbbbbbbbb","00:00:00"});
     logs.push_back({0,"ccccccccccccccccccc","00:00:00"});
@@ -70,7 +71,12 @@ int main(){/*
     logs.push_back({1,"ccccccccccccccccccc","00:00:00"});
     logs.push_back({0,"ccccccccccccccccccc","00:00:00"});
     logs.push_back({2,"ccccccccccccccccccc","00:00:00"});
-    logs.push_back({0,"ccccccccccccccccccc","00:00:00"});*/
+    logs.push_back({0,"ccccccccccccccccccc","00:00:00"});
+    logs.push_back({0,"ccccccccccccccccccc","00:00:00"});
+    logs.push_back({1,"ccccccccccccccccccc","00:00:00"});
+    logs.push_back({0,"ccccccccccccccccccc","00:00:00"});
+    logs.push_back({2,"ccccccccccccccccccc","00:00:00"});
+    logs.push_back({0,"ccccccccccccccccccc","00:00:00"});
 
     bool showInfo = true;
     bool showAdvice = true;
@@ -175,6 +181,9 @@ int main(){/*
                         ButtonError.toggled = showError;
         });
 
+        bool moveScroll = false;
+
+
         ///GET LOG;
         udp::Endpoint from;
         while (auto msg = sock.recv_string(from,0)){
@@ -195,6 +204,9 @@ int main(){/*
             if(uuid == runtimeUUID){
                 logs.push_back({level,text,timestamp});
                 std::cout << "Log Level: " << level << " Text: " << text << " Timestamp: " << timestamp << std::endl;
+                if(scroll <= -scrollmax+64){
+                    moveScroll = true;
+                }
             }
         }
 
@@ -202,12 +214,14 @@ int main(){/*
         if(GetMouseWheelMove() != 0.0f){
             scroll += 32 * GetMouseWheelMove();
 
-            scroll = std::clamp((int)scroll,-2000,0);
+            scroll = std::clamp((int)scroll,-(int)scrollmax,0);
         }
 
         ///DRAW
         BeginTextureMode(canvaslogs);
         int logindex = 0;
+
+        scrollmax = 0;
         for(Log& log : logs){
             Texture2D* iconlog = nullptr;
 
@@ -229,13 +243,22 @@ int main(){/*
                     break;
             }
 
+            scrollmax += iconlog->height;
+
             DrawTexture(*iconlog,0,iconlog->height * logindex + scroll,WHITE);
 
-            std::string txt = "[ " + log.logTimestamp + " ] - " + log.logText;
+            std::string txt = "[" + log.logTimestamp + "] - " + log.logText;
             DrawTextPro(consolasFont,txt.c_str(),{iconlog->width + 8,iconlog->height * logindex + 18+ scroll},{0,0},0,16,1,WHITE);
 
             logindex++;
         }
+        scrollmax -= 423;
+
+        if(moveScroll){
+            scroll = -scrollmax;
+        }
+
+        std::cout << scroll << " " << -scrollmax << std::endl;
 
         ClearBackground(BLANK);
 
