@@ -1,23 +1,28 @@
-#include <iostream>
-
 #define NOGDI
 #define NOUSER
-#include "udp.hpp"
 
+#include <iostream>
 #include <vector>
 #include <string>
-#include "raylib.h"
-#include "rlgl.h"
-#include "functional"
-#include "json.hpp"
+#include <functional>
 #include <algorithm>
 #include <chrono>
 #include <format>
+#include <fstream>
+
+#include "json.hpp"
+#include "udp.hpp"
+#include "raylib.h"
+#include "rlgl.h"
+#include "save.h"
 
 struct Log{
     int logLevel;
     std::string logText;
     std::string logTimestamp;
+    std::vector<std::string> lines;
+    int height = 0;
+    bool wrapped = false;
 };
 
 struct Button{
@@ -32,8 +37,17 @@ struct Button{
 std::string runtimeUUID = "nodefined";
 std::vector<Log> logs;
 
+const int logViewW = 759;
+const int logViewH = 423;
+const float fontSize = 16.0f;
+const float fontSpacing = 1.0f;
+const int lineHeight = 18;
+const int textTopOffset = 18;
+const int entryBottomPad = 8;
+
 void CheckButton(const Button& btn, std::function<void()> fnc){
-    if(CheckCollisionPointRec(GetMousePosition(),{btn.x,btn.y,btn.w,btn.h})){
+    Rectangle rect = {btn.x, btn.y, (float)btn.w, (float)btn.h};
+    if(CheckCollisionPointRec(GetMousePosition(), rect)){
         if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && fnc){
             fnc();
         }
@@ -56,28 +70,78 @@ std::string getActualTime(){
     return std::format("{:%H:%M:%S}", local_time);
 }
 
+float TextWidth(const Font& font, const std::string& s){
+    return MeasureTextEx(font, s.c_str(), fontSize, fontSpacing).x;
+}
+
+std::vector<std::string> WrapText(const Font& font, const std::string& text, float maxWidth){
+    std::vector<std::string> lines;
+
+    size_t start = 0;
+    while(true){
+        size_t end = text.find('\n', start);
+        std::string paragraph = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
+
+        std::string current;
+        size_t pos = 0;
+        while(pos <= paragraph.size()){
+            size_t sp = paragraph.find(' ', pos);
+            std::string word = paragraph.substr(pos, sp == std::string::npos ? std::string::npos : sp - pos);
+            pos = (sp == std::string::npos) ? paragraph.size() + 1 : sp + 1;
+
+            std::string candidate = current.empty() ? word : current + " " + word;
+            if(TextWidth(font, candidate) <= maxWidth){
+                current = candidate;
+                continue;
+            }
+
+            if(!current.empty()){
+                lines.push_back(current);
+                current.clear();
+            }
+
+            while(word.size() > 1 && TextWidth(font, word) > maxWidth){
+                size_t n = 1;
+                while(n < word.size() && TextWidth(font, word.substr(0, n + 1)) <= maxWidth) n++;
+                while(n > 1 && n < word.size() && (word[n] & 0xC0) == 0x80) n--;
+                lines.push_back(word.substr(0, n));
+                word = word.substr(n);
+            }
+            current = word;
+        }
+        lines.push_back(current);
+
+        if(end == std::string::npos) break;
+        start = end + 1;
+    }
+
+    if(lines.empty()) lines.push_back("");
+    return lines;
+}
+
+bool IsLevelVisible(int level, bool showInfo, bool showAdvice, bool showError){
+    switch(level){
+        case 0: return showInfo;
+        case 1: return showAdvice;
+        case 2: return showError;
+    }
+    return false;
+}
+
+Texture2D* IconForLevel(int level, Texture2D& info, Texture2D& advice, Texture2D& error){
+    switch(level){
+        case 0: return &info;
+        case 1: return &advice;
+        case 2: return &error;
+    }
+    return nullptr;
+}
+
 float windowAlpha = 0.0f;
 
 float scroll  = 0;
 float scrollmax = 0;
-bool autoscroll = false;
 int main(){
-    logs.push_back({0,"aaaaaaaa","00:00:00"});
-    logs.push_back({2,"bbbbbbbbbbbb","00:00:00"});
-    logs.push_back({0,"ccccccccccccccccccc","00:00:00"});
-    logs.push_back({1,"ccccccccccccccccccc","00:00:00"});
-    logs.push_back({0,"ccccccccccccccccccc","00:00:00"});
-    logs.push_back({0,"ccccccccccccccccccc","00:00:00"});
-    logs.push_back({1,"ccccccccccccccccccc","00:00:00"});
-    logs.push_back({0,"ccccccccccccccccccc","00:00:00"});
-    logs.push_back({2,"ccccccccccccccccccc","00:00:00"});
-    logs.push_back({0,"ccccccccccccccccccc","00:00:00"});
-    logs.push_back({0,"ccccccccccccccccccc","00:00:00"});
-    logs.push_back({1,"ccccccccccccccccccc","00:00:00"});
-    logs.push_back({0,"ccccccccccccccccccc","00:00:00"});
-    logs.push_back({2,"ccccccccccccccccccc","00:00:00"});
-    logs.push_back({0,"ccccccccccccccccccc","00:00:00"});
-
     bool showInfo = true;
     bool showAdvice = true;
     bool showError = true;
@@ -88,17 +152,14 @@ int main(){
         FLAG_WINDOW_UNDECORATED |
         FLAG_WINDOW_TRANSPARENT
     );
-    ///Init Window
     InitWindow(800,500,"ART Logger");
     SetTargetFPS(60);
 
     RenderTexture2D canvas = LoadRenderTexture(800, 500);
-    RenderTexture2D canvaslogs = LoadRenderTexture(759,423);
+    RenderTexture2D canvaslogs = LoadRenderTexture(logViewW,logViewH);
 
-    ///Load Font
     Font consolasFont = LoadFont("assets/consolas.ttf");
 
-    ///Load Images
     Texture2D background = LoadTexture("assets/background.png");
 
     Texture2D icon = LoadTexture("assets/icon.png");
@@ -124,20 +185,20 @@ int main(){
     Button ButtonAdvice = {adviceButton,197,14,adviceButton.width,adviceButton.height};
     Button ButtonError = {errorButton,250,14,errorButton.width,errorButton.height};
 
-    ///Start Socket and listener
     udp::Socket sock;
     sock.bind(7777,"127.0.0.1");
+
+    const int textX = informationIcon.width + 8;
+    const float textMaxWidth = (float)(logViewW - textX - 8);
 
     while(!shouldclose){
         if (windowAlpha + 0.1 <= 1.1) windowAlpha += 0.1;
         shouldclose = WindowShouldClose();
 
-        ///Maximize window if its minimized
         if(IsWindowMinimized() && IsWindowFocused()){
             RestoreWindow();
         }
 
-        ///DRAG N MOVE WINDOW
         Rectangle titleBar = {0,0,800,67};
 
         static bool dragging = false;
@@ -161,7 +222,6 @@ int main(){
             SetWindowPosition(windowPos.x + dragMouse.x - dragOffset.x ,windowPos.y + dragMouse.y - dragOffset.y);
         }
 
-        ///CHECK BUTTONS
         CheckButton(ButtonMinimize,[](){
                         MinimizeWindow();
         });
@@ -180,11 +240,17 @@ int main(){
                         showError = !showError;
                         ButtonError.toggled = showError;
         });
+        CheckButton(ButtonSave,[&](){
+                        std::string logToSave = "";
 
+                        for(Log& log : logs){
+                            logToSave = logToSave + "["+ log.logTimestamp + "] - " +  log.logText + "\n";
+                        }
+
+                        SaveTXTDialog(logToSave);
+        });
         bool moveScroll = false;
 
-
-        ///GET LOG;
         udp::Endpoint from;
         while (auto msg = sock.recv_string(from,0)){
             nlohmann::json j = nlohmann::json::parse(*msg,nullptr,false);
@@ -204,63 +270,64 @@ int main(){
             if(uuid == runtimeUUID){
                 logs.push_back({level,text,timestamp});
                 std::cout << "Log Level: " << level << " Text: " << text << " Timestamp: " << timestamp << std::endl;
-                if(scroll <= -scrollmax+64){
+
+                bool atBottom = scroll <= -scrollmax + 64;
+                if(atBottom && IsLevelVisible(level,showInfo,showAdvice,showError)){
                     moveScroll = true;
                 }
             }
         }
 
-        ///SCROLL
-        if(GetMouseWheelMove() != 0.0f){
-            scroll += 32 * GetMouseWheelMove();
-
-            scroll = std::clamp((int)scroll,-(int)scrollmax,0);
-        }
-
-        ///DRAW
-        BeginTextureMode(canvaslogs);
-        int logindex = 0;
-
-        scrollmax = 0;
+        // Layout pass: only visible logs count toward the total height
+        float totalHeight = 0;
         for(Log& log : logs){
-            Texture2D* iconlog = nullptr;
+            Texture2D* iconlog = IconForLevel(log.logLevel,informationIcon,adviceIcon,errorIcon);
+            if(!iconlog || !IsLevelVisible(log.logLevel,showInfo,showAdvice,showError)) continue;
 
-            switch(log.logLevel){
-                case 0:
-                    if(!showInfo) continue;
-
-                    iconlog = &informationIcon;
-                    break;
-                case 1:
-                    if(!showAdvice) continue;
-
-                    iconlog = &adviceIcon;
-                    break;
-                case 2:
-                    if(!showError) continue;
-
-                    iconlog = &errorIcon;
-                    break;
+            if(!log.wrapped){
+                std::string txt = "[" + log.logTimestamp + "] - " + log.logText;
+                log.lines = WrapText(consolasFont,txt,textMaxWidth);
+                log.height = std::max(iconlog->height,
+                                      textTopOffset + (int)log.lines.size() * lineHeight + entryBottomPad);
+                log.wrapped = true;
             }
 
-            scrollmax += iconlog->height;
-
-            DrawTexture(*iconlog,0,iconlog->height * logindex + scroll,WHITE);
-
-            std::string txt = "[" + log.logTimestamp + "] - " + log.logText;
-            DrawTextPro(consolasFont,txt.c_str(),{iconlog->width + 8,iconlog->height * logindex + 18+ scroll},{0,0},0,16,1,WHITE);
-
-            logindex++;
+            totalHeight += log.height;
         }
-        scrollmax -= 423;
+
+        scrollmax = std::max(0.0f,totalHeight - logViewH);
+
+        if(GetMouseWheelMove() != 0.0f){
+            scroll += 32 * GetMouseWheelMove();
+        }
 
         if(moveScroll){
             scroll = -scrollmax;
         }
 
-        std::cout << scroll << " " << -scrollmax << std::endl;
+        scroll = std::clamp(scroll,-scrollmax,0.0f);
+
+        BeginTextureMode(canvaslogs);
 
         ClearBackground(BLANK);
+
+        float y = scroll;
+        for(Log& log : logs){
+            Texture2D* iconlog = IconForLevel(log.logLevel,informationIcon,adviceIcon,errorIcon);
+            if(!iconlog || !IsLevelVisible(log.logLevel,showInfo,showAdvice,showError)) continue;
+
+            if(y + log.height >= 0 && y <= logViewH){
+                DrawTexture(*iconlog,0,(int)y,WHITE);
+
+                for(size_t i = 0; i < log.lines.size(); i++){
+                    DrawTextPro(consolasFont,log.lines[i].c_str(),
+                                {(float)textX, y + textTopOffset + i * lineHeight},
+                                {0,0},0,fontSize,fontSpacing,WHITE);
+                }
+            }
+
+            y += log.height;
+        }
 
         EndTextureMode();
 
@@ -295,7 +362,7 @@ int main(){
         DrawButton(ButtonAdvice);
         DrawButton(ButtonError);
 
-        DrawTextureRec(canvaslogs.texture,{0,0,759,-423},{0,77},WHITE);
+        DrawTextureRec(canvaslogs.texture,{0,0,(float)logViewW,-(float)logViewH},{0,77},WHITE);
 
         EndTextureMode();
 
@@ -303,7 +370,7 @@ int main(){
 
         ClearBackground(BLANK);
 
-        DrawTextureRec(canvas.texture,{0,0,800,-500},{0,0},{255,255,255,255*windowAlpha});
+        DrawTextureRec(canvas.texture,{0,0,800,-500},{0,0},{255,255,255,(unsigned char)(255*windowAlpha)});
 
         EndDrawing();
     }

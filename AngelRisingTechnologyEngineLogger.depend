@@ -1,13 +1,18 @@
 # depslib dependency file v1.0
-1794077504 source:d:\cpp projects\angelrisingtechnologyenginelogger\main.cpp
+1794289305 source:d:\cpp projects\angelrisingtechnologyenginelogger\main.cpp
 	<iostream>
-	"udp.hpp"
 	<vector>
 	<string>
+	<functional>
+	<algorithm>
+	<chrono>
+	<format>
+	<fstream>
+	"json.hpp"
+	"udp.hpp"
 	"raylib.h"
 	"rlgl.h"
-	"functional"
-	"json.hpp"
+	"save.h"
 
 1794030438 d:\cpp projects\angelrisingtechnologyenginelogger\udp.hpp
 	<cstddef>
@@ -227,4 +232,15 @@
 	<vector>
 	<any>
 	<string_view>
+
+1794289305 d:\cpp projects\angelrisingtechnologyenginelogger\save.h
+	<string>
+
+1794289365 source:d:\cpp projects\angelrisingtechnologyenginelogger\save.cpp
+	<winsock2.h>
+	<windows.h>
+	<commdlg.h>
+	<fstream>
+	<filesystem>
+	<string>
 
