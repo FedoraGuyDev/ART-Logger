@@ -35,6 +35,7 @@
 			<Add option="-fexceptions" />
 		</Compiler>
 		<Linker>
+			<Add option="-lcomdlg32" />
 			<Add library="C:/raylib/w64devkit/lib/libopengl32.a" />
 			<Add library="C:/raylib/w64devkit/lib/libgdi32.a" />
 			<Add library="C:/raylib/w64devkit/lib/libcomdlg32.a" />
@@ -45,6 +46,11 @@
 		</Linker>
 		<Unit filename="json.hpp" />
 		<Unit filename="main.cpp" />
+		<Unit filename="resources.rc">
+			<Option compilerVar="WINDRES" />
+		</Unit>
+		<Unit filename="save.cpp" />
+		<Unit filename="save.h" />
 		<Unit filename="udp.hpp" />
 		<Extensions />
 	</Project>
